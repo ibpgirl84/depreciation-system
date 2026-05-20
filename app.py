@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from io import BytesIO
 import calendar
 
@@ -21,49 +22,26 @@ st.title("📊 감가상각 자동계산 시스템")
 st.write("실무용 유무형자산 감가상각 자동계산")
 
 # =========================================
-# 기준월 선택
+# 기준일 선택 (원래 달력 형태)
 # =========================================
-st.subheader("기준월 선택")
-
-month_list = [
-    "1월", "2월", "3월", "4월", "5월", "6월",
-    "7월", "8월", "9월", "10월", "11월", "12월"
-]
-
-today = datetime.today()
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    selected_year = st.selectbox(
-        "년도",
-        list(range(today.year - 5, today.year + 6)),
-        index=5
-    )
-
-with col2:
-
-    selected_month_text = st.selectbox(
-        "월",
-        month_list,
-        index=today.month - 1
-    )
-
-selected_month = month_list.index(selected_month_text) + 1
-
-month_end_day = calendar.monthrange(
-    selected_year,
-    selected_month
-)[1]
-
-base_date = datetime(
-    selected_year,
-    selected_month,
-    month_end_day
+base_date = st.date_input(
+    "기준월 선택",
+    datetime.today()
 )
 
-st.write(f"기준월 말일 : {base_date.strftime('%Y-%m-%d')}")
+# 기준월 말일 계산
+month_end = calendar.monthrange(
+    base_date.year,
+    base_date.month
+)[1]
+
+base_month_end = datetime(
+    base_date.year,
+    base_date.month,
+    month_end
+)
+
+st.write(f"기준월 말일 : {base_month_end.strftime('%Y-%m-%d')}")
 
 # =========================================
 # 업로드
@@ -84,6 +62,42 @@ def format_number(x):
         return x
 
 # =========================================
+# 전표 계정 매핑
+# =========================================
+account_mapping = {
+
+    "차량": {
+        "차변": "유형자산상각비/차량운반구",
+        "대변": "차량운반구감가상각누계액"
+    },
+
+    "비품": {
+        "차변": "유형자산상각비/비품",
+        "대변": "비품감가상각누계액"
+    },
+
+    "시설장치": {
+        "차변": "유형자산상각비/시설장치",
+        "대변": "시설장치감가상각누계액"
+    },
+
+    "소프트웨어": {
+        "차변": "무형자산상각비/소프트웨어",
+        "대변": "소프트웨어상각누계액"
+    },
+
+    "상표권": {
+        "차변": "무형자산상각비/상표권",
+        "대변": "상표권상각누계액"
+    },
+
+    "기타무형자산": {
+        "차변": "무형자산상각비/기타무형자산",
+        "대변": "기타무형자산상각누계액"
+    }
+}
+
+# =========================================
 # 감가상각 계산
 # =========================================
 if uploaded_file:
@@ -96,7 +110,9 @@ if uploaded_file:
         )
 
         total_result = []
-        total_journal = []
+
+        # 전표 합산용
+        journal_summary = {}
 
         # =========================================
         # 시트별 처리
@@ -105,7 +121,7 @@ if uploaded_file:
 
             st.subheader(f"📁 시트 처리 : {sheet_name}")
 
-            # 컬럼명 정리
+            # 컬럼 정리
             df.columns = [str(col).strip() for col in df.columns]
 
             required_cols = ["취득일", "품명", "취득가액"]
@@ -119,21 +135,16 @@ if uploaded_file:
 
             if missing_cols:
 
-                st.warning(
-                    f"{sheet_name} 시트 컬럼 누락 : {missing_cols}"
-                )
-
+                st.warning(f"{sheet_name} 시트 컬럼 누락 : {missing_cols}")
                 continue
 
-            # =========================================
             # 숫자 처리
-            # =========================================
             df["취득가액"] = pd.to_numeric(
                 df["취득가액"],
                 errors="coerce"
             ).fillna(0)
 
-            # 내용연수
+            # 내용연수 기본값
             if "내용연수" not in df.columns:
                 df["내용연수"] = 5
 
@@ -142,7 +153,7 @@ if uploaded_file:
                 errors="coerce"
             ).fillna(5)
 
-            # 잔존가액
+            # 잔존가액 기본값
             if "잔존가액" not in df.columns:
                 df["잔존가액"] = 0
 
@@ -160,21 +171,13 @@ if uploaded_file:
 
                 try:
 
-                    acquire_date = pd.to_datetime(
-                        row["취득일"]
-                    )
+                    acquire_date = pd.to_datetime(row["취득일"])
 
-                    amount = float(
-                        row["취득가액"]
-                    )
+                    amount = float(row["취득가액"])
 
-                    life_years = float(
-                        row["내용연수"]
-                    )
+                    life_years = float(row["내용연수"])
 
-                    remain_value = float(
-                        row["잔존가액"]
-                    )
+                    remain_value = float(row["잔존가액"])
 
                     # 월 감가상각비
                     monthly_dep = (
@@ -183,8 +186,8 @@ if uploaded_file:
 
                     # 사용개월수
                     used_months = (
-                        (base_date.year - acquire_date.year) * 12
-                        + (base_date.month - acquire_date.month)
+                        (base_month_end.year - acquire_date.year) * 12
+                        + (base_month_end.month - acquire_date.month)
                     )
 
                     used_months = max(0, used_months)
@@ -192,29 +195,24 @@ if uploaded_file:
                     # 누계액
                     accumulated = monthly_dep * used_months
 
-                    # 누계액 최대 제한
-                    if accumulated > amount:
-                        accumulated = amount
-
-                    # 미상각잔액
+                    # 장부가액
                     book_value = amount - accumulated
 
-                    # 미상각잔액 0 이하면 감가상각 중지
+                    # 감가종료 처리
                     if book_value <= 0:
 
                         monthly_dep_display = 0
+                        accumulated = amount - remain_value
                         book_value = 0
 
                     else:
 
                         monthly_dep_display = monthly_dep
 
-                    # =========================================
                     # 결과 저장
-                    # =========================================
                     result_rows.append({
 
-                        "계정명": sheet_name,
+                        "구분명": sheet_name,
                         "품명": row["품명"],
                         "취득일": acquire_date.strftime("%Y-%m-%d"),
                         "취득가액": format_number(amount),
@@ -225,69 +223,20 @@ if uploaded_file:
                     })
 
                     # =========================================
-                    # 전표 생성
+                    # 전표 합산
                     # =========================================
                     if monthly_dep_display > 0:
 
-                        # 차량운반구
-                        if sheet_name == "차량운반구":
+                        if sheet_name not in journal_summary:
+                            journal_summary[sheet_name] = 0
 
-                            debit_account = "유형자산상각비/차량운반구"
-                            credit_account = "차량운반구감가상각누계액"
-
-                        # 비품
-                        elif sheet_name == "비품":
-
-                            debit_account = "유형자산상각비/비품"
-                            credit_account = "비품감가상각누계액"
-
-                        # 시설장치
-                        elif sheet_name == "시설장치":
-
-                            debit_account = "유형자산상각비/시설장치"
-                            credit_account = "시설장치감가상각누계액"
-
-                        # 소프트웨어
-                        elif sheet_name == "소프트웨어":
-
-                            debit_account = "무형자산상각비/소프트웨어"
-                            credit_account = "소프트웨어상각누계액"
-
-                        # 상표권
-                        elif sheet_name == "상표권":
-
-                            debit_account = "무형자산상각비/상표권"
-                            credit_account = "상표권상각누계액"
-
-                        # 기타무형자산
-                        elif sheet_name == "기타무형자산":
-
-                            debit_account = "무형자산상각비/기타무형자산"
-                            credit_account = "기타무형자산상각누계액"
-
-                        # 기본값
-                        else:
-
-                            debit_account = "감가상각비"
-                            credit_account = "감가상각누계액"
-
-                        total_journal.append({
-
-                            "계정명": sheet_name,
-                            "차변계정": debit_account,
-                            "대변계정": credit_account,
-                            "금액": format_number(monthly_dep_display)
-
-                        })
+                        journal_summary[sheet_name] += monthly_dep_display
 
                 except:
                     pass
 
             result_df = pd.DataFrame(result_rows)
 
-            # =========================================
-            # 결과 출력
-            # =========================================
             if len(result_df) > 0:
 
                 st.dataframe(
@@ -298,13 +247,44 @@ if uploaded_file:
                 total_result.append(result_df)
 
         # =========================================
+        # 전표 생성 (구분명 합산)
+        # =========================================
+        journal_rows = []
+
+        for division, amount in journal_summary.items():
+
+            mapping = account_mapping.get(division)
+
+            if mapping:
+
+                journal_rows.append({
+
+                    "구분명": division,
+                    "차변계정": mapping["차변"],
+                    "대변계정": mapping["대변"],
+                    "합산금액": format_number(amount)
+
+                })
+
+            else:
+
+                journal_rows.append({
+
+                    "구분명": division,
+                    "차변계정": "감가상각비",
+                    "대변계정": "감가상각누계액",
+                    "합산금액": format_number(amount)
+
+                })
+
+        # =========================================
         # 전표 출력
         # =========================================
-        if len(total_journal) > 0:
+        if len(journal_rows) > 0:
 
             st.subheader("🧾 전표 생성")
 
-            journal_df = pd.DataFrame(total_journal)
+            journal_df = pd.DataFrame(journal_rows)
 
             st.dataframe(
                 journal_df,
@@ -321,7 +301,7 @@ if uploaded_file:
             engine="openpyxl"
         ) as writer:
 
-            # 결과 시트
+            # 결과 시트 저장
             for i, df in enumerate(total_result):
 
                 sheet = f"결과_{i+1}"
@@ -332,8 +312,8 @@ if uploaded_file:
                     index=False
                 )
 
-            # 전표 시트
-            if len(total_journal) > 0:
+            # 전표 저장
+            if len(journal_rows) > 0:
 
                 journal_df.to_excel(
                     writer,
@@ -341,7 +321,6 @@ if uploaded_file:
                     index=False
                 )
 
-        # 다운로드 버튼
         st.download_button(
             label="📥 결과 엑셀 다운로드",
             data=output.getvalue(),
