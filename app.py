@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 import calendar
-from dateutil.relativedelta import relativedelta
 
 # =========================================
 # 페이지 설정
@@ -21,11 +20,11 @@ st.title("📊 감가상각 자동계산 시스템")
 st.write("실무용 유무형자산 감가상각 자동계산")
 
 # =========================================
-# 기준월 선택
+# 기준월 선택 (처음 달력 방식 복구)
 # =========================================
 base_date = st.date_input(
     "기준월 선택",
-    datetime.today()
+    value=datetime.today()
 )
 
 # 기준월 말일 계산
@@ -34,15 +33,13 @@ last_day = calendar.monthrange(
     base_date.month
 )[1]
 
-base_month_end = datetime(
+base_date = datetime(
     base_date.year,
     base_date.month,
     last_day
 )
 
-st.write(
-    f"기준월 말일 : {base_month_end.strftime('%Y-%m-%d')}"
-)
+st.write(f"기준월 말일 : {base_date.strftime('%Y-%m-%d')}")
 
 # =========================================
 # 업로드
@@ -63,51 +60,44 @@ def format_number(x):
         return x
 
 # =========================================
-# 회계정책 내용연수
-# =========================================
-life_mapping = {
-
-    "차량": 4,              # 48개월
-    "비품": 5,
-    "시설장치": 5,
-    "소프트웨어": 5,
-    "상표권": 5,
-    "기타무형자산": 5
-}
-
-# =========================================
-# 전표 계정 매핑
+# 계정 매핑
 # =========================================
 account_mapping = {
 
     "차량": {
-        "차변": "유형자산상각비/차량운반구",
-        "대변": "차량운반구감가상각누계액"
+        "debit": "유형자산상각비/차량운반구",
+        "credit": "차량운반구감가상각누계액",
+        "life_months": 48
     },
 
     "비품": {
-        "차변": "유형자산상각비/비품",
-        "대변": "비품감가상각누계액"
+        "debit": "유형자산상각비/비품",
+        "credit": "비품감가상각누계액",
+        "life_months": 60
     },
 
     "시설장치": {
-        "차변": "유형자산상각비/시설장치",
-        "대변": "시설장치감가상각누계액"
+        "debit": "유형자산상각비/시설장치",
+        "credit": "시설장치감가상각누계액",
+        "life_months": 60
     },
 
     "소프트웨어": {
-        "차변": "무형자산상각비/소프트웨어",
-        "대변": "소프트웨어"
+        "debit": "무형자산상각비/소프트웨어",
+        "credit": "소프트웨어",
+        "life_months": 60
     },
 
     "상표권": {
-        "차변": "무형자산상각비/상표권",
-        "대변": "상표권"
+        "debit": "무형자산상각비/상표권",
+        "credit": "상표권",
+        "life_months": 60
     },
 
     "기타무형자산": {
-        "차변": "무형자산상각비/기타무형자산",
-        "대변": "기타무형자산"
+        "debit": "무형자산상각비/기타무형자산",
+        "credit": "기타무형자산",
+        "life_months": 60
     }
 }
 
@@ -124,22 +114,13 @@ if uploaded_file:
         )
 
         total_result = []
-
-        # 전표 합산용
         journal_summary = {}
 
-        # =========================================
-        # 시트별 처리
-        # =========================================
         for sheet_name, df in excel_data.items():
 
             st.subheader(f"📁 시트 처리 : {sheet_name}")
 
-            # 컬럼명 공백 제거
-            df.columns = [
-                str(col).strip()
-                for col in df.columns
-            ]
+            df.columns = [str(col).strip() for col in df.columns]
 
             required_cols = [
                 "취득일",
@@ -150,28 +131,21 @@ if uploaded_file:
             missing_cols = []
 
             for col in required_cols:
-
                 if col not in df.columns:
                     missing_cols.append(col)
 
-            # 필수 컬럼 누락
             if missing_cols:
-
                 st.warning(
                     f"{sheet_name} 시트 컬럼 누락 : {missing_cols}"
                 )
-
                 continue
 
-            # =========================================
             # 숫자 처리
-            # =========================================
             df["취득가액"] = pd.to_numeric(
                 df["취득가액"],
                 errors="coerce"
             ).fillna(0)
 
-            # 잔존가액
             if "잔존가액" not in df.columns:
                 df["잔존가액"] = 0
 
@@ -180,28 +154,8 @@ if uploaded_file:
                 errors="coerce"
             ).fillna(0)
 
-            # =========================================
-            # 회계정책 내용연수 적용
-            # =========================================
-            if "내용연수" not in df.columns:
-
-                df["내용연수"] = life_mapping.get(
-                    sheet_name,
-                    5
-                )
-
-            df["내용연수"] = pd.to_numeric(
-                df["내용연수"],
-                errors="coerce"
-            ).fillna(
-                life_mapping.get(sheet_name, 5)
-            )
-
             result_rows = []
 
-            # =========================================
-            # 자산별 계산
-            # =========================================
             for idx, row in df.iterrows():
 
                 try:
@@ -210,140 +164,109 @@ if uploaded_file:
                         row["취득일"]
                     )
 
-                    amount = float(
-                        row["취득가액"]
-                    )
-
-                    life_years = float(
-                        row["내용연수"]
-                    )
+                    amount = float(row["취득가액"])
 
                     remain_value = float(
                         row["잔존가액"]
                     )
 
-                    # 월 감가상각비
-                    monthly_dep = (
-                        amount - remain_value
-                    ) / (life_years * 12)
+                    # 구분명 자동 인식
+                    category = sheet_name.strip()
 
-                    # =========================================
-                    # 사용개월수 계산
-                    # =========================================
-                    diff = relativedelta(
-                        base_month_end,
-                        acquire_date
+                    # 정책 없으면 기본 60개월
+                    if category in account_mapping:
+
+                        useful_months = account_mapping[
+                            category
+                        ]["life_months"]
+
+                    else:
+
+                        useful_months = 60
+
+                    # =====================================
+                    # 정액법 계산
+                    # =====================================
+
+                    depreciable_amount = (
+                        amount - remain_value
                     )
 
+                    monthly_dep = (
+                        depreciable_amount
+                        / useful_months
+                    )
+
+                    # 사용개월수
                     used_months = (
-                        diff.years * 12
-                        + diff.months
+                        (base_date.year - acquire_date.year) * 12
+                        + (base_date.month - acquire_date.month)
                     )
 
                     # 취득월 포함
                     used_months += 1
 
-                    used_months = max(
-                        0,
-                        used_months
-                    )
+                    if used_months < 0:
+                        used_months = 0
 
-                    # 최대개월수 제한
-                    max_months = int(
-                        life_years * 12
-                    )
+                    # 최대 개월 제한
+                    if used_months > useful_months:
+                        used_months = useful_months
 
-                    used_months = min(
-                        used_months,
-                        max_months
-                    )
-
-                    # =========================================
-                    # 감가상각누계액
-                    # =========================================
+                    # 누계액
                     accumulated = round(
-                        monthly_dep * used_months,
-                        0
+                        monthly_dep * used_months
                     )
 
-                    # =========================================
-                    # 미상각잔액
-                    # =========================================
-                    book_value = round(
-                        amount - accumulated,
-                        0
+                    # 장부가
+                    book_value = (
+                        amount - accumulated
                     )
 
-                    # 1,000원 이하 0 처리
+                    # 미상각잔액 1000원 이하 제거
                     if abs(book_value) <= 1000:
-
                         book_value = 0
 
-                    # =========================================
-                    # 결과 저장
-                    # =========================================
-                    result_rows.append({
-
-                        "구분명": sheet_name,
-
-                        "품명": row["품명"],
-
-                        "취득일":
-                        acquire_date.strftime(
-                            "%Y-%m-%d"
-                        ),
-
-                        "취득가액":
-                        format_number(amount),
-
-                        "당월감가상각비":
-                        format_number(
-                            0 if book_value == 0
-                            else monthly_dep
-                        ),
-
-                        "감가상각누계액":
-                        format_number(accumulated),
-
-                        "미상각잔액":
-                        format_number(book_value)
-                    })
-
-                    # =========================================
-                    # 전표 제외 처리
-                    # =========================================
-                    if book_value == 0:
-                        continue
-
-                    # =========================================
-                    # 전표 계정
-                    # =========================================
-                    if sheet_name in account_mapping:
-
-                        debit_account = account_mapping[
-                            sheet_name
-                        ]["차변"]
-
-                        credit_account = account_mapping[
-                            sheet_name
-                        ]["대변"]
+                    # 감가상각 종료
+                    if used_months >= useful_months:
+                        monthly_dep_display = 0
+                        book_value = 0
 
                     else:
+                        monthly_dep_display = round(
+                            monthly_dep
+                        )
 
-                        debit_account = "감가상각비"
-                        credit_account = "감가상각누계액"
+                    result_rows.append({
 
-                    key = (
-                        sheet_name,
-                        debit_account,
-                        credit_account
-                    )
+                        "구분명": category,
+                        "품명": row["품명"],
+                        "취득일": acquire_date.strftime(
+                            "%Y-%m-%d"
+                        ),
+                        "취득가액": format_number(amount),
+                        "당월감가상각비": format_number(
+                            monthly_dep_display
+                        ),
+                        "감가상각누계액": format_number(
+                            accumulated
+                        ),
+                        "미상각잔액": format_number(
+                            book_value
+                        )
+                    })
 
-                    if key not in journal_summary:
+                    # =====================================
+                    # 전표 합산
+                    # =====================================
+                    if monthly_dep_display > 0:
 
-                        journal_summary[key] = 0
+                        if category not in journal_summary:
+                            journal_summary[category] = 0
 
-                    journal_summary[key] += monthly_dep
+                        journal_summary[category] += (
+                            monthly_dep_display
+                        )
 
                 except:
                     pass
@@ -364,31 +287,36 @@ if uploaded_file:
         # =========================================
         journal_rows = []
 
-        for key, amount in journal_summary.items():
+        for category, amount in journal_summary.items():
 
-            sheet_name = key[0]
-            debit = key[1]
-            credit = key[2]
+            if category in account_mapping:
+
+                debit_account = account_mapping[
+                    category
+                ]["debit"]
+
+                credit_account = account_mapping[
+                    category
+                ]["credit"]
+
+            else:
+
+                debit_account = "감가상각비"
+                credit_account = "감가상각누계액"
 
             journal_rows.append({
 
-                "구분명": sheet_name,
-
-                "차변계정": debit,
-
-                "대변계정": credit,
-
-                "합산금액":
-                format_number(amount)
+                "구분명": category,
+                "차변계정": debit_account,
+                "대변계정": credit_account,
+                "합산금액": format_number(amount)
             })
 
-        journal_df = pd.DataFrame(
-            journal_rows
-        )
-
-        if len(journal_df) > 0:
+        if len(journal_rows) > 0:
 
             st.subheader("🧾 전표 생성")
+
+            journal_df = pd.DataFrame(journal_rows)
 
             st.dataframe(
                 journal_df,
@@ -405,7 +333,6 @@ if uploaded_file:
             engine="openpyxl"
         ) as writer:
 
-            # 결과 저장
             for i, df in enumerate(total_result):
 
                 sheet = f"결과_{i+1}"
@@ -416,8 +343,7 @@ if uploaded_file:
                     index=False
                 )
 
-            # 전표 저장
-            if len(journal_df) > 0:
+            if len(journal_rows) > 0:
 
                 journal_df.to_excel(
                     writer,
