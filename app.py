@@ -233,7 +233,6 @@ if uploaded_file:
                             base_month_end.month
                             - acquire_date.month
                         )
-                        + 1
                     )
 
                     used_months = max(
@@ -261,15 +260,10 @@ if uploaded_file:
                         amount - accumulated
                     )
 
-                    # 1,000원 이하 제거
+                    # 1,000원 이하 0 처리
                     if abs(book_value) <= 1000:
 
                         book_value = 0
-
-                    # 감가 완료 자산 제외
-                    if book_value <= 0:
-
-                        continue
 
                     # =========================================
                     # 결과 저장
@@ -289,7 +283,10 @@ if uploaded_file:
                         format_number(amount),
 
                         "당월감가상각비":
-                        format_number(monthly_dep),
+                        format_number(
+                            0 if book_value == 0
+                            else monthly_dep
+                        ),
 
                         "감가상각누계액":
                         format_number(accumulated),
@@ -297,6 +294,12 @@ if uploaded_file:
                         "미상각잔액":
                         format_number(book_value)
                     })
+
+                    # =========================================
+                    # 전표 제외 처리
+                    # =========================================
+                    if book_value == 0:
+                        continue
 
                     # =========================================
                     # 전표 합산
