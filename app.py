@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 import calendar
+from dateutil.relativedelta import relativedelta
 
 # =========================================
 # 페이지 설정
@@ -226,21 +227,28 @@ if uploaded_file:
                         amount - remain_value
                     ) / (life_years * 12)
 
-                    # 사용개월수
-                    used_months = (
-                        (base_month_end.year - acquire_date.year) * 12
-                        + (
-                            base_month_end.month
-                            - acquire_date.month
-                        )
+                    # =========================================
+                    # 사용개월수 계산
+                    # =========================================
+                    diff = relativedelta(
+                        base_month_end,
+                        acquire_date
                     )
+
+                    used_months = (
+                        diff.years * 12
+                        + diff.months
+                    )
+
+                    # 취득월 포함
+                    used_months += 1
 
                     used_months = max(
                         0,
                         used_months
                     )
 
-                    # 최대개월수
+                    # 최대개월수 제한
                     max_months = int(
                         life_years * 12
                     )
@@ -250,14 +258,20 @@ if uploaded_file:
                         max_months
                     )
 
+                    # =========================================
                     # 감가상각누계액
-                    accumulated = (
-                        monthly_dep * used_months
+                    # =========================================
+                    accumulated = round(
+                        monthly_dep * used_months,
+                        0
                     )
 
+                    # =========================================
                     # 미상각잔액
-                    book_value = (
-                        amount - accumulated
+                    # =========================================
+                    book_value = round(
+                        amount - accumulated,
+                        0
                     )
 
                     # 1,000원 이하 0 처리
@@ -302,7 +316,7 @@ if uploaded_file:
                         continue
 
                     # =========================================
-                    # 전표 합산
+                    # 전표 계정
                     # =========================================
                     if sheet_name in account_mapping:
 
