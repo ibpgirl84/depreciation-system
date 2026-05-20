@@ -20,7 +20,7 @@ st.title("📊 감가상각 자동계산 시스템")
 st.write("실무용 유무형자산 감가상각 자동계산")
 
 # =========================================
-# 기준월 선택 (달력 원래 방식)
+# 기준월 선택
 # =========================================
 base_date = st.date_input(
     "기준월 선택",
@@ -57,12 +57,25 @@ uploaded_file = st.file_uploader(
 def format_number(x):
 
     try:
-        return f"{int(round(float(x),0)):,}"
+        return f"{int(round(float(x), 0)):,}"
     except:
         return x
 
 # =========================================
-# 계정 매핑
+# 회계정책 내용연수
+# =========================================
+life_mapping = {
+
+    "차량": 4,              # 48개월
+    "비품": 5,
+    "시설장치": 5,
+    "소프트웨어": 5,
+    "상표권": 5,
+    "기타무형자산": 5
+}
+
+# =========================================
+# 전표 계정 매핑
 # =========================================
 account_mapping = {
 
@@ -114,11 +127,14 @@ if uploaded_file:
         # 전표 합산용
         journal_summary = {}
 
+        # =========================================
+        # 시트별 처리
+        # =========================================
         for sheet_name, df in excel_data.items():
 
             st.subheader(f"📁 시트 처리 : {sheet_name}")
 
-            # 컬럼명 정리
+            # 컬럼명 공백 제거
             df.columns = [
                 str(col).strip()
                 for col in df.columns
@@ -137,6 +153,7 @@ if uploaded_file:
                 if col not in df.columns:
                     missing_cols.append(col)
 
+            # 필수 컬럼 누락
             if missing_cols:
 
                 st.warning(
@@ -145,20 +162,13 @@ if uploaded_file:
 
                 continue
 
+            # =========================================
             # 숫자 처리
+            # =========================================
             df["취득가액"] = pd.to_numeric(
                 df["취득가액"],
                 errors="coerce"
             ).fillna(0)
-
-            # 내용연수
-            if "내용연수" not in df.columns:
-                df["내용연수"] = 5
-
-            df["내용연수"] = pd.to_numeric(
-                df["내용연수"],
-                errors="coerce"
-            ).fillna(5)
 
             # 잔존가액
             if "잔존가액" not in df.columns:
@@ -169,8 +179,28 @@ if uploaded_file:
                 errors="coerce"
             ).fillna(0)
 
+            # =========================================
+            # 회계정책 내용연수 적용
+            # =========================================
+            if "내용연수" not in df.columns:
+
+                df["내용연수"] = life_mapping.get(
+                    sheet_name,
+                    5
+                )
+
+            df["내용연수"] = pd.to_numeric(
+                df["내용연수"],
+                errors="coerce"
+            ).fillna(
+                life_mapping.get(sheet_name, 5)
+            )
+
             result_rows = []
 
+            # =========================================
+            # 자산별 계산
+            # =========================================
             for idx, row in df.iterrows():
 
                 try:
@@ -179,7 +209,9 @@ if uploaded_file:
                         row["취득일"]
                     )
 
-                    amount = float(row["취득가액"])
+                    amount = float(
+                        row["취득가액"]
+                    )
 
                     life_years = float(
                         row["내용연수"]
@@ -194,13 +226,14 @@ if uploaded_file:
                         amount - remain_value
                     ) / (life_years * 12)
 
-                    # 사용월수 계산
+                    # 사용개월수
                     used_months = (
                         (base_month_end.year - acquire_date.year) * 12
                         + (
                             base_month_end.month
                             - acquire_date.month
                         )
+                        + 1
                     )
 
                     used_months = max(
@@ -208,6 +241,7 @@ if uploaded_file:
                         used_months
                     )
 
+                    # 최대개월수
                     max_months = int(
                         life_years * 12
                     )
@@ -217,22 +251,29 @@ if uploaded_file:
                         max_months
                     )
 
-                    # 누계액
+                    # 감가상각누계액
                     accumulated = (
                         monthly_dep * used_months
                     )
 
-                    # 장부가액
+                    # 미상각잔액
                     book_value = (
                         amount - accumulated
                     )
+
+                    # 1,000원 이하 제거
+                    if abs(book_value) <= 1000:
+
+                        book_value = 0
 
                     # 감가 완료 자산 제외
                     if book_value <= 0:
 
                         continue
 
+                    # =========================================
                     # 결과 저장
+                    # =========================================
                     result_rows.append({
 
                         "구분명": sheet_name,
@@ -257,9 +298,9 @@ if uploaded_file:
                         format_number(book_value)
                     })
 
-                    # =====================
+                    # =========================================
                     # 전표 합산
-                    # =====================
+                    # =========================================
                     if sheet_name in account_mapping:
 
                         debit_account = account_mapping[
@@ -302,7 +343,7 @@ if uploaded_file:
                 total_result.append(result_df)
 
         # =========================================
-        # 전표 생성 (합산)
+        # 전표 생성
         # =========================================
         journal_rows = []
 
@@ -347,6 +388,7 @@ if uploaded_file:
             engine="openpyxl"
         ) as writer:
 
+            # 결과 저장
             for i, df in enumerate(total_result):
 
                 sheet = f"결과_{i+1}"
@@ -357,6 +399,7 @@ if uploaded_file:
                     index=False
                 )
 
+            # 전표 저장
             if len(journal_df) > 0:
 
                 journal_df.to_excel(
