@@ -117,6 +117,7 @@ if uploaded_file:
 
         total_result = []
 
+        # 전표 합산용
         journal_summary = {}
 
         # =====================================
@@ -128,7 +129,7 @@ if uploaded_file:
                 f"📁 시트 처리 : {sheet_name}"
             )
 
-            # 컬럼 정리
+            # 컬럼명 정리
             df.columns = [
                 str(col).strip()
                 for col in df.columns
@@ -155,7 +156,7 @@ if uploaded_file:
 
                 continue
 
-            # 숫자 변환
+            # 숫자형 변환
             df["취득가액"] = pd.to_numeric(
                 df["취득가액"],
                 errors="coerce"
@@ -217,8 +218,9 @@ if uploaded_file:
 
                     # ================================
                     # 월상각비
+                    # 소수 유지
                     # ================================
-                    monthly_dep = round(
+                    monthly_dep = (
                         depreciable_amount
                         / useful_months
                     )
@@ -249,7 +251,7 @@ if uploaded_file:
                     # ================================
                     # 감가상각누계액
                     # ================================
-                    accumulated = round(
+                    accumulated = (
                         monthly_dep
                         * used_months
                     )
@@ -257,11 +259,11 @@ if uploaded_file:
                     # ================================
                     # 미상각잔액
                     # ================================
-                    book_value = round(
+                    book_value = (
                         amount - accumulated
                     )
 
-                    # 1,000원 이하 제거
+                    # 1000원 이하 제거
                     if abs(book_value) <= 1000:
 
                         book_value = 0
@@ -296,20 +298,21 @@ if uploaded_file:
                         ),
 
                         "당월감가상각비": format_number(
-                            monthly_dep_display
+                            round(monthly_dep_display)
                         ),
 
                         "감가상각누계액": format_number(
-                            accumulated
+                            round(accumulated)
                         ),
 
                         "미상각잔액": format_number(
-                            book_value
+                            round(book_value)
                         )
                     })
 
                     # ================================
                     # 전표 합산
+                    # 소수 유지 상태로 합산
                     # ================================
                     if monthly_dep_display > 0:
 
@@ -324,7 +327,7 @@ if uploaded_file:
 
                         journal_summary[
                             category
-                        ] += monthly_dep_display
+                        ] += monthly_dep
 
                 except:
                     pass
@@ -381,8 +384,9 @@ if uploaded_file:
 
                 "대변계정": credit_account,
 
+                # 마지막에만 반올림
                 "합산금액": format_number(
-                    round(amount)
+                    int(round(amount, 0))
                 )
             })
 
