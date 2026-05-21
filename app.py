@@ -27,7 +27,7 @@ base_date = st.date_input(
     value=datetime.today()
 )
 
-# 말일 계산
+# 기준월 말일 처리
 last_day = calendar.monthrange(
     base_date.year,
     base_date.month
@@ -44,7 +44,7 @@ st.write(
 )
 
 # =========================================
-# 업로드
+# 파일 업로드
 # =========================================
 uploaded_file = st.file_uploader(
     "유무형자산 엑셀 업로드",
@@ -57,7 +57,7 @@ uploaded_file = st.file_uploader(
 def format_number(x):
 
     try:
-        return f"{int(round(float(x), 0)):,}"
+        return f"{int(x):,}"
     except:
         return x
 
@@ -117,7 +117,6 @@ if uploaded_file:
 
         total_result = []
 
-        # 전표 합산용
         journal_summary = {}
 
         # =====================================
@@ -148,6 +147,7 @@ if uploaded_file:
                 if col not in df.columns:
                     missing_cols.append(col)
 
+            # 필수컬럼 없으면 건너뜀
             if missing_cols:
 
                 st.warning(
@@ -156,12 +156,15 @@ if uploaded_file:
 
                 continue
 
-            # 숫자형 변환
+            # =====================================
+            # 숫자 변환
+            # =====================================
             df["취득가액"] = pd.to_numeric(
                 df["취득가액"],
                 errors="coerce"
             ).fillna(0)
 
+            # 잔존가액
             if "잔존가액" not in df.columns:
 
                 df["잔존가액"] = 0
@@ -195,7 +198,7 @@ if uploaded_file:
                     )
 
                     # ================================
-                    # 내용연수
+                    # 내용연수 개월
                     # ================================
                     if category in account_mapping:
 
@@ -218,9 +221,9 @@ if uploaded_file:
 
                     # ================================
                     # 월상각비
-                    # 소수 유지
+                    # Excel INT 방식 적용
                     # ================================
-                    monthly_dep = (
+                    monthly_dep = int(
                         depreciable_amount
                         / useful_months
                     )
@@ -238,6 +241,7 @@ if uploaded_file:
                         )
                     )
 
+                    # 최소/최대 제한
                     used_months = max(
                         0,
                         used_months
@@ -251,7 +255,7 @@ if uploaded_file:
                     # ================================
                     # 감가상각누계액
                     # ================================
-                    accumulated = (
+                    accumulated = int(
                         monthly_dep
                         * used_months
                     )
@@ -259,7 +263,7 @@ if uploaded_file:
                     # ================================
                     # 미상각잔액
                     # ================================
-                    book_value = (
+                    book_value = int(
                         amount - accumulated
                     )
 
@@ -268,7 +272,9 @@ if uploaded_file:
 
                         book_value = 0
 
-                    # 감가상각 종료
+                    # ================================
+                    # 감가상각 종료 처리
+                    # ================================
                     if used_months >= useful_months:
 
                         monthly_dep_display = 0
@@ -298,21 +304,20 @@ if uploaded_file:
                         ),
 
                         "당월감가상각비": format_number(
-                            round(monthly_dep_display)
+                            monthly_dep_display
                         ),
 
                         "감가상각누계액": format_number(
-                            round(accumulated)
+                            accumulated
                         ),
 
                         "미상각잔액": format_number(
-                            round(book_value)
+                            book_value
                         )
                     })
 
                     # ================================
                     # 전표 합산
-                    # 소수 유지 상태로 합산
                     # ================================
                     if monthly_dep_display > 0:
 
@@ -384,9 +389,8 @@ if uploaded_file:
 
                 "대변계정": credit_account,
 
-                # 마지막에만 반올림
                 "합산금액": format_number(
-                    int(round(amount, 0))
+                    int(amount)
                 )
             })
 
